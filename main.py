@@ -1,242 +1,284 @@
 #!/usr/bin/env python3
-"""Draw the 20 Nov 2026 world-news front page (1024x1024 PNG).
+"""Draw the front page of THE WORLD TODAY for Friday, 20 November 2026.
 
-Entry for make.fun news-image-20261120: "Sum up 20 November's world
-news in one image". The image is drawn entirely by this program
-(Python standard library + PIL, Noto fonts bundled under fonts/ so the
-render is identical in any sandbox). No generated imagery, no network,
-no randomness, no clocks: two runs write the same bytes.
+A single-file newspaper front page, drawn entirely with Pillow: a
+masthead with the date, one lead story beside a line-drawn globe, five
+more stories in a ruled two-column grid, and an ALSO TODAY strip at the
+foot. The picture is fully deterministic -- no randomness, no clock, no
+network -- so two runs write identical bytes.
 
-Stories are real headlines from the 20 November 2026 news cycle,
-verified against Reuters, BBC, USA Today, CNN, Le Monde, The Hindu
-and NASA on the day. Layout budget (1024 tall): masthead to ~172,
-lead to ~400, row 2 to ~592, row 3 to ~792, footer to ~1000.
+Run:  MAKEFUN_OUTPUT_DIR=<dir> python3 -P -s main.py
+Writes <dir>/entry.png (1024 x 1024).
 """
+
 import math
 import os
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1024, 1024
-M = 36  # margin
-
+PAGE_W = 1024
+PAGE_H = 1024
+MARGIN = 44
+GUTTER = 28
+INK = (22, 22, 22)
 PAPER = (248, 244, 233)
-INK = (25, 23, 19)
-RED = (164, 31, 31)
-MUTED = (96, 89, 76)
-BODY = (52, 48, 42)
-FAINT = (200, 192, 172)
+RED = (158, 27, 27)
+GREY = (96, 92, 84)
 
 HERE = Path(__file__).resolve().parent
-OUTPUT_DIR = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
+FONTS = HERE / "fonts"
 
-# Bundled fonts first (deterministic in any sandbox), then the usual
-# system locations, then PIL's built-in bitmap font as a last resort.
-FONT_CANDIDATES = {
-    "black": ["NotoSerifDisplay-Black.ttf", "DejaVuSerif-Bold.ttf"],
-    "serif_bold": ["NotoSerif-Bold.ttf", "DejaVuSerif-Bold.ttf"],
-    "sans_bold": ["NotoSans-Bold.ttf", "DejaVuSans-Bold.ttf"],
-    "sans": ["NotoSans-Regular.ttf", "DejaVuSans.ttf"],
+
+def load(name, size):
+    return ImageFont.truetype(str(FONTS / name), size)
+
+
+F = {
+    "title": load("NotoSerifDisplay-Black.ttf", 72),
+    "date": load("NotoSans-Bold.ttf", 20),
+    "kick": load("NotoSans-Bold.ttf", 16),
+    "head": load("NotoSerif-Bold.ttf", 42),
+    "sub": load("NotoSerif-Bold.ttf", 28),
+    "body": load("NotoSans-Regular.ttf", 19),
+    "small": load("NotoSans-Regular.ttf", 18),
+    "also_b": load("NotoSans-Bold.ttf", 17),
+    "also": load("NotoSans-Regular.ttf", 17),
+    "foot": load("NotoSans-Regular.ttf", 15),
 }
-FONT_DIRS = [
-    HERE / "fonts",
-    Path("/usr/share/fonts/truetype/noto"),
-    Path("/usr/share/fonts/truetype/dejavu"),
+
+LEAD_KICK = "APEC SUMMIT  \u2022  SHENZHEN"
+LEAD_HEAD = "TRUMP, XI AND PUTIN HOLD FIRST-EVER THREE-WAY TALKS"
+LEAD_BODY = (
+    "Donald Trump, Xi Jinping and Vladimir Putin held 90 minutes of "
+    "three-way talks on the sidelines of APEC \u2014 the first such "
+    "meeting. A joint statement pledged UN reform, lower nuclear risk "
+    "and higher oil output, but no breakthrough on Ukraine or Iran."
+)
+
+STORIES = [
+    {
+        "kick": "THE HAGUE",
+        "head": "COURT FINDS MYANMAR GUILTY OF GENOCIDE",
+        "body": (
+            "The International Court of Justice ruled Myanmar committed "
+            "genocide against the Rohingya in 2017 \u2014 the first "
+            "ruling of its kind \u2014 and ordered reparations."
+        ),
+    },
+    {
+        "kick": "MARKETS",
+        "head": "ANTHROPIC IPO IS THE BIGGEST EVER",
+        "body": (
+            "Anthropic priced its shares at $83 and raised $81.3 "
+            "billion, the largest offering in history. The stock jumped "
+            "34% at its Nasdaq debut before easing back."
+        ),
+    },
+    {
+        "kick": "INDIA",
+        "head": "CYCLONE AKVAN STRIKES ODISHA COAST",
+        "body": (
+            "Cyclone Akvan came ashore near Gopalpur, Odisha, around "
+            "noon. Some 300,000 people were evacuated, 423 rescue "
+            "teams deployed and 69 trains cancelled."
+        ),
+    },
+    {
+        "kick": "SAUDI ARABIA",
+        "head": "HOUTHI STRIKE HITS RIYADH\u2019S PIF TOWER",
+        "body": (
+            "A Houthi attack damaged the Public Investment Fund tower "
+            "in Riyadh, shattering windows across seven floors. No one "
+            "was hurt."
+        ),
+    },
 ]
 
+STRIP = {
+    "kick": "WASHINGTON",
+    "head": "TRUMP IN NO RUSH ON IRAN \u2014 DECISION WAITS UNTIL 2027",
+    "body": (
+        "Donald Trump said there was no hurry over Iran and that he "
+        "would decide after 1 January, pushing any decision into 2027."
+    ),
+}
 
-def font(kind, size):
-    for name in FONT_CANDIDATES[kind]:
-        for d in FONT_DIRS:
-            p = d / name
-            if p.is_file():
-                return ImageFont.truetype(str(p), size)
-    return ImageFont.load_default(size=size)
+ALSO = [
+    (
+        "VOYAGER 1",
+        "NASA confirms Voyager 1 is one light-day from Earth \u2014 a "
+        "first for a human-made object.",
+    ),
+    (
+        "UKRAINE",
+        "European leaders say they are ready to negotiate with Russia "
+        "to end the war in Ukraine.",
+    ),
+]
+
+FOOT = "Every story above was first reported on Friday, 20 November 2026."
 
 
-def wrap(draw, text, fnt, max_w):
-    """Greedy word wrap; returns list of lines (never truncates)."""
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
+def wrap(draw, text, font, width):
+    """Greedy word wrap; returns a list of lines that fit in width."""
+    lines = []
+    current = ""
+    for word in text.split():
+        trial = word if not current else current + " " + word
+        if draw.textlength(trial, font=font) <= width:
+            current = trial
         else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def para(draw, x, y, text, fnt, max_w, leading, fill=INK):
-    lines = wrap(draw, text, fnt, max_w)
-    for ln in lines:
-        draw.text((x, y), ln, font=fnt, fill=fill)
+def para(draw, x, y, width, text, font, leading, color=INK):
+    for line in wrap(draw, text, font, width):
+        draw.text((x, y), line, font=font, fill=color)
         y += leading
     return y
 
 
-def hline(draw, x0, x1, y, width=2, fill=INK):
-    draw.line([(x0, y), (x1, y)], fill=fill, width=width)
-
-
-def kicker(draw, x, y, text, size=19):
-    f = font("sans_bold", size)
-    draw.text((x, y), text, font=f, fill=RED)
-    return y + size + 7
-
-
-def story(draw, x, y, w, kick, head, head_size, summary, sum_size=19):
-    """One story block; returns y after it."""
-    y = kicker(draw, x, y, kick)
-    y = para(draw, x, y, head, font("serif_bold", head_size),
-             w, head_size + 5)
-    y += 5
-    y = para(draw, x, y, summary, font("sans", sum_size),
-             w, sum_size + 6, fill=BODY)
-    return y
+def rule(draw, y, weight=2):
+    draw.line([(MARGIN, y), (PAGE_W - MARGIN, y)], fill=INK, width=weight)
+    return y + weight
 
 
 def globe(draw, cx, cy, r):
-    """Small line-drawn globe: circle, meridians, parallels."""
+    """A small line-art globe: circle, meridians, latitude chords."""
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=INK, width=3)
-    for lon in (35, 70):
-        rx = r * math.sin(math.radians(lon))
-        draw.ellipse([cx - rx, cy - r, cx + rx, cy + r], outline=INK, width=2)
-    draw.line([(cx, cy - r), (cx, cy + r)], fill=INK, width=2)
-    for k in (-0.5, 0.5):
-        yy = cy + k * r
-        half = (r * r - (k * r) ** 2) ** 0.5
-        draw.line([(cx - half, yy), (cx + half, yy)], fill=INK, width=2)
+    for frac in (0.45, 0.85):
+        w = int(r * frac)
+        draw.ellipse([cx - w, cy - r, cx + w, cy + r], outline=INK, width=2)
+    for dy in (-r // 2, 0, r // 2):
+        half = int(math.sqrt(max(r * r - dy * dy, 0)))
+        draw.line([(cx - half, cy + dy), (cx + half, cy + dy)],
+                  fill=INK, width=2)
+    for dx, dy in ((-r // 3, -r // 3), (r // 4, r // 5), (-r // 5, r // 2)):
+        dot = 4
+        draw.ellipse([cx + dx - dot, cy + dy - dot,
+                      cx + dx + dot, cy + dy + dot], fill=RED)
+
+
+def story(draw, x, y, width, item):
+    draw.text((x, y), item["kick"], font=F["kick"], fill=RED)
+    y += 21
+    y = para(draw, x, y, width, item["head"], F["sub"], 33)
+    y += 4
+    y = para(draw, x, y, width, item["body"], F["small"], 22)
+    return y
+
+
+def label_para(draw, x, y, width, label, text):
+    """Bold label followed by regular text, flowing across lines."""
+    head = label + " \u2014 "
+    head_w = draw.textlength(head, font=F["also_b"])
+    words = text.split()
+    first = head
+    rest = []
+    overflow = False
+    for word in words:
+        if overflow:
+            rest.append(word)
+            continue
+        trial = first + word + " "
+        trial_w = head_w + draw.textlength(trial[len(head):], font=F["also"])
+        if trial_w <= width:
+            first = trial
+        else:
+            overflow = True
+            rest.append(word)
+    draw.text((x, y), head, font=F["also_b"], fill=RED)
+    draw.text((x + head_w, y), first[len(head):], font=F["also"],
+              fill=INK)
+    y += 21
+    for line in wrap(draw, " ".join(rest), F["also"], width):
+        draw.text((x, y), line, font=F["also"], fill=INK)
+        y += 21
+    return y
+
+
+def build():
+    img = Image.new("RGB", (PAGE_W, PAGE_H), PAPER)
+    d = ImageDraw.Draw(img)
+    y = 30
+
+    d.line([(MARGIN, y), (PAGE_W - MARGIN, y)], fill=INK, width=2)
+    y += 12
+    title = "THE WORLD TODAY"
+    tw = d.textlength(title, font=F["title"])
+    d.text(((PAGE_W - tw) / 2, y), title, font=F["title"], fill=INK)
+    y += 88
+    date = "FRIDAY, 20 NOVEMBER 2026"
+    dw = d.textlength(date, font=F["date"])
+    d.text(((PAGE_W - dw) / 2, y), date, font=F["date"], fill=INK)
+    y += 28
+    y = rule(d, y, 3)
+    y += 5
+    y = rule(d, y, 1)
+    y += 10
+
+    # Lead story: kicker, headline, body on the left, globe on the right.
+    d.text((MARGIN, y), LEAD_KICK, font=F["kick"], fill=RED)
+    y += 22
+    y = para(d, MARGIN, y, PAGE_W - 2 * MARGIN, LEAD_HEAD, F["head"], 47)
+    y += 8
+    body_top = y
+    y = para(d, MARGIN, y, 600, LEAD_BODY, F["body"], 24)
+    globe(d, 852, body_top + 56, 56)
+    y = max(y, body_top + 112) + 8
+    y = rule(d, y, 2)
+    y += 10
+
+    # Two-column grid: stories 1-2, then stories 3-4.
+    col_w = (PAGE_W - 2 * MARGIN - GUTTER) // 2
+    col2 = MARGIN + col_w + GUTTER
+    for row in range(2):
+        left = story(d, MARGIN, y, col_w, STORIES[row * 2])
+        right = story(d, col2, y, col_w, STORIES[row * 2 + 1])
+        y = max(left, right) + 10
+        y = rule(d, y, 1)
+        y += 10
+
+    # Full-width strip: story 5.
+    d.text((MARGIN, y), STRIP["kick"], font=F["kick"], fill=RED)
+    y += 21
+    y = para(d, MARGIN, y, PAGE_W - 2 * MARGIN, STRIP["head"], F["sub"], 33)
+    y += 4
+    y = para(d, MARGIN, y, PAGE_W - 2 * MARGIN, STRIP["body"], F["small"], 22)
+    y += 10
+    y = rule(d, y, 2)
+    y += 10
+
+    # ALSO TODAY band.
+    band_top = y
+    d.text((MARGIN, y), "ALSO TODAY", font=F["kick"], fill=RED)
+    y += 22
+    left = label_para(d, MARGIN, y, col_w, ALSO[0][0], ALSO[0][1])
+    right = label_para(d, col2, y, col_w, ALSO[1][0], ALSO[1][1])
+    y = max(left, right) + 8
+    d.rectangle([MARGIN, band_top - 8, PAGE_W - MARGIN, y], outline=INK,
+                width=1)
+    y += 10
+
+    # Footer note naming the day again.
+    fw = d.textlength(FOOT, font=F["foot"])
+    d.text(((PAGE_W - fw) / 2, y), FOOT, font=F["foot"], fill=GREY)
+    y += 20
+    return img, y
 
 
 def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-
-    # ---- Masthead ----
-    y = 24
-    title = "THE WORLD TODAY"
-    tf = font("black", 68)
-    d.text(((W - d.textlength(title, font=tf)) / 2, y), title, font=tf, fill=INK)
-    y += 84
-    hline(d, M, W - M, y, 3)
-    hline(d, M, W - M, y + 5, 1)
-    y += 13
-    date = "FRIDAY, 20 NOVEMBER 2026"
-    df = font("sans_bold", 24)
-    d.text(((W - d.textlength(date, font=df)) / 2, y), date, font=df, fill=INK)
-    y += 32
-    tag = "THE DAY IN SIX STORIES  \u00b7  ONE IMAGE"
-    gf = font("sans", 17)
-    d.text(((W - d.textlength(tag, font=gf)) / 2, y), tag, font=gf, fill=MUTED)
-    y += 22
-    hline(d, M, W - M, y, 1, fill=FAINT)
-
-    # ---- Lead story: the Shenzhen trilateral ----
-    y += 10
-    lx, lw = M, 640
-    y = kicker(d, lx, y, "LEAD STORY  \u2014  SHENZHEN", 19)
-    y = para(d, lx, y, "Three powers, one table",
-             font("black", 48), lw, 58)
-    y += 2
-    y = para(d, lx, y,
-             "Trump, Xi and Putin hold first-ever three-way talks; "
-             "joint vow on UN, nukes and oil",
-             font("serif_bold", 25), lw, 31)
-    y += 6
-    y = para(d, lx, y,
-             "The three leaders meet for 90 minutes at the APEC summit in "
-             "Shenzhen and issue a joint declaration to reform the UN, cut "
-             "nuclear risks and boost oil output \u2014 but reach no "
-             "breakthrough on Ukraine or Iran.",
-             font("sans", 19), lw, 25, fill=BODY)
-    lead_bottom = y
-    globe(d, W - M - 100, 292, 88)
-    cap = "SHENZHEN, THURSDAY"
-    cf = font("sans_bold", 14)
-    d.text((W - M - 100 - d.textlength(cap, font=cf) / 2, 292 + 88 + 10),
-           cap, font=cf, fill=MUTED)
-
-    # ---- Row 2: the world court + the record IPO ----
-    y = lead_bottom + 10
-    hline(d, M, W - M, y, 1, fill=FAINT)
-    y += 10
-    col_w = 464
-    y2 = story(d, M, y, col_w,
-               "JUSTICE  \u2014  THE HAGUE",
-               "World court: Myanmar committed genocide",
-               31,
-               "The ICJ rules Myanmar\u2019s forces committed genocide against "
-               "the Rohingya in the 2017 crackdown \u2014 the first time the "
-               "court has held a state responsible \u2014 and orders "
-               "reparations.", 19)
-    y3 = story(d, M + col_w + 24, y, col_w,
-               "MARKETS  \u2014  NEW YORK",
-               "Anthropic\u2019s $81bn IPO sets a record",
-               31,
-               "The Claude-maker prices at $83 a share and raises $81.3bn, "
-               "the biggest IPO ever. Shares open 34% higher on their "
-               "Nasdaq debut, then pull back.", 19)
-    y = max(y2, y3)
-
-    # ---- Row 3: three columns ----
-    y += 10
-    hline(d, M, W - M, y, 1, fill=FAINT)
-    y += 10
-    cw = 296
-    gap = 30
-    x1, x2, x3 = M, M + cw + gap, M + 2 * (cw + gap)
-    ya = story(d, x1, y, cw,
-               "WEATHER  \u2014  INDIA",
-               "Cyclone Akvan hits Odisha coast",
-               28,
-               "The storm crosses near Gopalpur at noon; 300,000 people "
-               "evacuated, 423 rescue teams deployed, 69 trains cancelled.",
-               18)
-    yb = story(d, x2, y, cw,
-               "MIDDLE EAST  \u2014  RIYADH",
-               "Houthi strike hits Riyadh\u2019s tallest tower",
-               28,
-               "A missile damages the PIF Tower, home of the Saudi wealth "
-               "fund, blowing out windows over seven floors. No injuries.",
-               18)
-    yc = story(d, x3, y, cw,
-               "WASHINGTON",
-               "Trump: no rush on Iran",
-               28,
-               "The president says he will \u201csee what happens\u201d after "
-               "1 January, pushing any decision on Iran into 2027.", 18)
-    y = max(ya, yb, yc)
-
-    # ---- Footer: also today + sources ----
-    y += 8
-    hline(d, M, W - M, y, 3)
-    hline(d, M, W - M, y + 5, 1)
-    y += 14
-    y = kicker(d, M, y, "ALSO TODAY", 17)
-    y = para(d, M, y,
-             "NASA confirms Voyager 1 is one light-day from Earth, the first "
-             "human-made object to reach it  \u00b7  European leaders say they "
-             "are ready for talks with Russia on ending the Ukraine war",
-             font("sans", 18), W - 2 * M, 24, fill=BODY)
-    y += 6
-    src = ("Sources: Reuters, BBC, USA Today, CNN, Le Monde, The Hindu, NASA "
-           "\u2014 20 November 2026")
-    sf = font("sans", 14)
-    d.text((M, y), src, font=sf, fill=MUTED)
-    y += 20
-    assert y <= H, f"layout overflow: final y={y}"
-    print("final y:", y)
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUTPUT_DIR / "entry.png"
-    img.save(out, "PNG", optimize=True)
-    print("saved", out, out.stat().st_size, "bytes")
+    out_dir = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "out"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    img, final_y = build()
+    print("final y:", final_y, "of", PAGE_H)
+    img.save(out_dir / "entry.png")
 
 
 if __name__ == "__main__":
